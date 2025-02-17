@@ -1,0 +1,71 @@
+services:
+  database:
+    image: cmangos-classicdb:bazel
+    restart: unless-stopped
+    environment:
+      - TZ=Etc/UTC
+      - MARIADB_USER=mangos
+      - MARIADB_PASSWORD=mangos
+      - MARIADB_ROOT_PASSWORD=password
+      - CMANGOS_REALMLIST_NAME=CMaNGOS
+      - CMANGOS_REALMLIST_ADDRESS=127.0.0.1
+      - CMANGOS_REALMLIST_PORT=8085
+      - CMANGOS_REALMLIST_ICON=1
+      - CMANGOS_REALMLIST_TIMEZONE=0
+      - CMANGOS_REALMLIST_ALLOWED_SECURITY_LEVEL=0
+
+  wait-for-db:
+    image: atkrad/wait4x
+    depends_on:
+      - database
+    command: tcp database:3306 -t 600s -i 5s
+
+  realmd:
+    image: cmangos-classic:bots
+    command: realmd
+    ulimits:
+      nofile: 1024
+    depends_on:
+      wait-for-db:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    ports:
+      - 3724:3724
+    environment:
+      - TZ=Etc/UTC
+
+  mangosd:
+    image: cmangos-classic:bots
+    command: mangosd
+    ulimits:
+      nofile: 1024
+    tty: true
+    stdin_open: true
+    depends_on:
+      wait-for-db:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    stop_grace_period: 2m
+    ports:
+      - 8085:8085
+    environment:
+      - TZ=Etc/UTC
+    volumes:
+      - map-data:/opt/mangos/storage/data:ro
+
+  phpmyadmin:
+    image: phpmyadmin
+    depends_on:
+      - database
+    restart: unless-stopped
+    ports:
+      - 8080:80
+    environment:
+      - PMA_HOST=database
+      - PMA_PORT=3306
+      - PMA_USER=root
+      - PMA_PASSWORD=password # Must match the `MARIADB_ROOT_PASSWORD` environment variable of the `database` service
+
+volumes:
+  map-data:
+    external: true
