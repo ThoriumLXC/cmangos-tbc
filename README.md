@@ -1,0 +1,2 @@
+# cmangos-tbc
+Stub
