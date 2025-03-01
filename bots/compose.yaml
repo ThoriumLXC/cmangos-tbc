@@ -1,0 +1,128 @@
+services:
+  database:
+    image: docker.io/thoriumlxc/cmangos-tbcdb:${CALVER_TAG}
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 1m
+      timeout: 3s
+      retries: 5
+      start_period: 5m
+    volumes:
+      - cmangos-tbc-database:/var/lib/mysql
+    environment:
+      - TZ=Etc/UTC
+      # Username & Password configurations
+      - MARIADB_USER=${MARIADB_USER}
+      - MARIADB_PASSWORD=${MARIADB_PASSWORD}
+      - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD}
+      # Emulator Specific
+      - REALMLIST_NAME=CMaNGOS
+      - REALMLIST_ADDRESS=${REALMLIST_ADDRESS}
+      - REALMLIST_PORT=8085
+      - REALMLIST_ICON=1
+      - REALMLIST_TIMEZONE=0
+      - REALMLIST_ALLOWED_SECURITY_LEVEL=0
+
+  wait-for-db:
+    image: atkrad/wait4x
+    depends_on:
+      - database
+    command: tcp database:3306 -t 600s -i 5s
+
+  database-backup:
+    image: tiredofit/db-backup
+    depends_on:
+      - database
+    restart: unless-stopped
+    volumes:
+      - ./backups:/backup
+    environment:
+      - TZ=Etc/UTC
+      - CONTAINER_ENABLE_MONITORING=False
+      - USER_DBBACKUP=${UID}
+      - GROUP_DBBACKUP=${GID}
+      # Backup policies
+      - DEFAULT_COMPRESSION=GZ
+      - DEFAULT_BACKUP_INTERVAL=1440
+      - DEFAULT_BACKUP_BEGIN=0400
+      - DEFAULT_CLEANUP_TIME=10080
+      # Target Database
+      - DB01_TYPE=mariadb
+      - DB01_HOST=database
+      - DB01_NAME=${BACKUP_DBS}
+      - DB01_USER=root
+      - DB01_PASS=${MARIADB_ROOT_PASSWORD}
+
+  phpmyadmin:
+    image: phpmyadmin
+    depends_on:
+      - database
+    restart: unless-stopped
+    ports:
+      - 8080:80
+    environment:
+      - PMA_HOST=database
+      - PMA_PORT=3306
+      - PMA_USER=root
+      - PMA_PASSWORD=${MARIADB_ROOT_PASSWORD}
+
+  # ================================================
+
+  realmd:
+    image: docker.io/thoriumlxc/cmangos-tbc:bots-${CALVER_TAG}
+    user: ${UID}:7878
+    command: realmd
+    ulimits:
+      nofile: 1024
+    depends_on:
+      wait-for-db:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ['CMD', 'nc', '-z', 'localhost', '3724']
+      interval: 1m
+      timeout: 3s
+      retries: 5
+      start_period: 5m
+    restart: unless-stopped
+    volumes:
+      - ./realmd.conf:/opt/mangos/etc/realmd.conf:ro
+      - ./logs/realmd:/opt/mangos/storage/logs
+    ports:
+      - 3724:3724
+    environment:
+      - TZ=Etc/UTC
+
+  mangosd:
+    image: docker.io/thoriumlxc/cmangos-tbc:bots-${CALVER_TAG}
+    user: ${UID}:7878
+    command: mangosd
+    ulimits:
+      nofile: 1024
+    tty: true
+    stdin_open: true
+    depends_on:
+      wait-for-db:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    stop_grace_period: 2m
+    healthcheck:
+      test: ['CMD', 'nc', '-z', 'localhost', '8085']
+      interval: 1m
+      timeout: 3s
+      retries: 5
+      start_period: 5m
+    ports:
+      - 8085:8085
+    environment:
+      - TZ=Etc/UTC
+    volumes:
+      - cmangos-tbc-map-data:/opt/mangos/storage/data:ro
+      - ./mangosd.conf:/opt/mangos/etc/mangosd.conf:ro
+      - ./logs/mangosd:/opt/mangos/storage/logs
+      - ./storage/honor:/opt/mangos/storage/honor
+
+volumes:
+  cmangos-tbc-database:
+  cmangos-tbc-map-data:
+    external: true
